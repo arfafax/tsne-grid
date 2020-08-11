@@ -16,6 +16,8 @@ from tensorflow.python.keras.models import Model, Sequential
 from tensorflow.python.keras.layers import Flatten
 import umap
 
+from sklearn.decomposition import PCA
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--size', type=int, help="number of small images in a row/column in output image")
 parser.add_argument('-d', '--dir', type=str, help="source directory for images")
@@ -24,6 +26,11 @@ parser.add_argument('-n', '--name', type=str, default='umap_grid.jpg', help='nam
 parser.add_argument('-p', '--path', type=str, default='./', help="destination directory for output image")
 parser.add_argument('-x', '--per', type=int, default=50, help="tsne perplexity")
 parser.add_argument('-i', '--iter', type=int, default=5000, help="number of iterations in tsne algorithm")
+parser.add_argument('-t', '--tsne', dest="use_tsne", action='store_true', help="Use t-SNE instead of UMAP")
+parser.add_argument('-u', '--umap', dest="use_tsne", action='store_false', help="Use UMAP instead of t-SNE")
+parser.add_argument('-pca', '--pca', dest="use_pca", action="store_true", help="Use PCA on activations")
+parser.set_defaults(use_tsne=False)
+parser.set_defaults(use_pca=False)
 
 args = parser.parse_args()
 out_res = args.res
@@ -32,6 +39,8 @@ out_dim = args.size
 to_plot = np.square(out_dim)
 perplexity = args.per
 tsne_iter = args.iter
+use_tsne = args.use_tsne
+use_pca = args.use_pca
 
 if out_dim == 1:
     raise ValueError("Output grid dimension 1x1 not supported.")
@@ -82,6 +91,32 @@ def get_activations(model, img_collection, filenames, precomputed_activations = 
         activations.append(np.squeeze(model.predict(x)))
     return activations
 
+def get_activations2(model, img_collection, filenames, precomputed_activations = None):
+    activations = []
+    print("Files:", len(filenames))
+    start_index = len(precomputed_activations)
+    if precomputed_activations:
+        activations = precomputed_activations
+    for idx, img in enumerate(img_collection[start_index:]):
+        if idx >= to_plot:
+            break;
+        filename = filenames[start_index + idx]
+        seed_idx = int(filename.split("seed")[1].split(".")[0])
+        rnd = np.random.RandomState(seed_idx)
+        z = rnd.randn(1, 512)
+        print("Processing image {}: {}".format(idx+1, filenames[start_index+idx]))
+        activations.append(np.squeeze(z))
+    return activations
+
+def generate_tsne(activations):
+    tsne = TSNE(perplexity=perplexity, n_components=2, init='random', n_iter=tsne_iter)
+    X_2d = tsne.fit_transform(np.array(activations)[0:to_plot,:])
+    X_2d -= X_2d.min(axis=0)
+    X_2d /= X_2d.max(axis=0)
+    return X_2d
+
+
+
 def generate_umap(activations):
     reducer = umap.UMAP()
     embedding = reducer.fit_transform(np.array(activations)[0:to_plot,:])
@@ -90,7 +125,7 @@ def generate_umap(activations):
     X_2d /= X_2d.max(axis=0)
     return X_2d
 
-def save_umap_grid(img_collection, X_2d, out_res, out_dim):
+def save_grid(img_collection, X_2d, out_res, out_dim):
     grid = np.dstack(np.meshgrid(np.linspace(0, 1, out_dim), np.linspace(0, 1, out_dim))).reshape(-1, 2)
     cost_matrix = cdist(grid, X_2d, "sqeuclidean").astype(np.float32)
     cost_matrix = cost_matrix * (100000 / cost_matrix.max())
@@ -123,9 +158,22 @@ def main():
     pickle.dump({"files": img_files, "activations": activations}, pickle_out)
     pickle_out.close()
     print("Generating 2D representation.")
-    X_2d = generate_umap(activations)
+
+    if use_pca:
+        print("Using PCA on activations")
+        pca = PCA(n_components=300)
+        pca.fit(activations)
+        pca_activations = pca.transform(activations)
+        activations = pca_activations
+    X_2d = None
+    if use_tsne:
+        print("Using t-SNE")
+        X_2d = generate_tsne(activations)
+    else:
+        print("Using UMAP")
+        X_2d = generate_umap(activations)
     print("Generating image grid.")
-    save_umap_grid(img_collection, X_2d, out_res, out_dim)
+    save_grid(img_collection, X_2d, out_res, out_dim)
 
 if __name__ == '__main__':
     main()
