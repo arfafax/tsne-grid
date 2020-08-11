@@ -3,6 +3,7 @@ import os, argparse
 import tensorflow as tf
 import matplotlib as mlp
 import matplotlib.pyplot as plt
+import pickle
 from PIL import Image
 from lapjv import lapjv
 from sklearn.manifold import TSNE
@@ -52,20 +53,27 @@ def build_model():
 
 def load_img(in_dir):
     pred_img = [f for f in os.listdir(in_dir) if os.path.isfile(os.path.join(in_dir, f))]
+    pred_img.sort()
     img_collection = []
     for idx, img in enumerate(pred_img):
+        if idx >= to_plot:
+            break;
         img = os.path.join(in_dir, img)
         img_collection.append(image.load_img(img, target_size=(out_res, out_res)))
     if (np.square(out_dim) > len(img_collection)):
         raise ValueError("Cannot fit {} images in {}x{} grid".format(len(img_collection), out_dim, out_dim))
-    return img_collection
+    return pred_img, img_collection
 
-def get_activations(model, img_collection):
+def get_activations(model, img_collection, filenames, precomputed_activations = None):
     activations = []
-    for idx, img in enumerate(img_collection):
-        if idx == to_plot:
+    print("Files:", len(filenames))
+    start_index = len(precomputed_activations)
+    if precomputed_activations:
+        activations = precomputed_activations
+    for idx, img in enumerate(img_collection[start_index:]):
+        if idx >= to_plot:
             break;
-        print("Processing image {}".format(idx+1))
+        print("Processing image {}: {}".format(idx+1, filenames[start_index+idx]))
         img = img.resize((224, 224), Image.ANTIALIAS)
         x = image.img_to_array(img)
         x = np.expand_dims(x, axis=0)
@@ -86,6 +94,10 @@ def save_tsne_grid(img_collection, X_2d, out_res, out_dim):
     cost_matrix = cost_matrix * (100000 / cost_matrix.max())
     row_asses, col_asses, _ = lapjv(cost_matrix)
     grid_jv = grid[col_asses]
+
+    pickle_out = open("grid_locs.pkl", "wb")
+    pickle.dump(grid_jv, pickle_out)
+    pickle_out.close()
     out = np.ones((out_dim*out_res, out_dim*out_res, 3))
 
     for pos, img in zip(grid_jv, img_collection[0:to_plot]):
@@ -98,8 +110,16 @@ def save_tsne_grid(img_collection, X_2d, out_res, out_dim):
 
 def main():
     model = build_model()
-    img_collection = load_img(in_dir)
-    activations = get_activations(model, img_collection)
+    img_files, img_collection = load_img(in_dir)
+    precomputed_activations = []
+    if os.path.exists("activations.pkl"):
+        pickle_in = open("activations.pkl", "rb")
+        precomputed_activations = pickle.load(pickle_in)['activations']
+        print("Loading {} activations from pkl".format(len(precomputed_activations)))
+    activations = get_activations(model, img_collection, img_files, precomputed_activations)
+    pickle_out = open("activations.pkl", "wb")
+    pickle.dump({"files": img_files, "activations": activations}, pickle_out)
+    pickle_out.close()
     print("Generating 2D representation.")
     X_2d = generate_tsne(activations)
     print("Generating image grid.")

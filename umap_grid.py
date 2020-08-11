@@ -57,7 +57,7 @@ def load_img(in_dir):
     pred_img.sort()
     img_collection = []
     for idx, img in enumerate(pred_img):
-        if idx == to_plot:
+        if idx >= to_plot:
             break;
         img = os.path.join(in_dir, img)
         img_collection.append(image.load_img(img, target_size=(out_res, out_res)))
@@ -65,14 +65,16 @@ def load_img(in_dir):
         raise ValueError("Cannot fit {} images in {}x{} grid".format(len(img_collection), out_dim, out_dim))
     return pred_img, img_collection
 
-def get_activations(model, img_collection, precomputed_activations = None):
+def get_activations(model, img_collection, filenames, precomputed_activations = None):
     activations = []
+    print("Files:", len(filenames))
+    start_index = len(precomputed_activations)
     if precomputed_activations:
         activations = precomputed_activations
-    for idx, img in enumerate(img_collection[len(precomputed_activations):]):
-        if idx == to_plot:
+    for idx, img in enumerate(img_collection[start_index:]):
+        if idx >= to_plot:
             break;
-        print("Processing image {}".format(idx+1))
+        print("Processing image {}: {}".format(idx+1, filenames[start_index+idx]))
         img = img.resize((224, 224), Image.ANTIALIAS)
         x = image.img_to_array(img)
         x = np.expand_dims(x, axis=0)
@@ -116,7 +118,7 @@ def main():
         pickle_in = open("activations.pkl", "rb")
         precomputed_activations = pickle.load(pickle_in)['activations']
         print("Loading {} activations from pkl".format(len(precomputed_activations)))
-    activations = get_activations(model, img_collection, precomputed_activations)
+    activations = get_activations(model, img_collection, img_files, precomputed_activations)
     pickle_out = open("activations.pkl", "wb")
     pickle.dump({"files": img_files, "activations": activations}, pickle_out)
     pickle_out.close()
